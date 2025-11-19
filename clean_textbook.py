@@ -203,6 +203,10 @@ def main():
         title = chapter['title']
         content = simple_clean(chapter['content'])
 
+        # --- NEW: scrub the trailing "Selected Readings References" phrase ---
+        content = content.replace("Selected Readings References", "")
+        # (keeps everything else exactly the same)
+
         if not content.strip():
             print(f"[DEBUG] Skipping empty chapter: {title}")
             continue
