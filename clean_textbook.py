@@ -15,16 +15,25 @@ FONT_TOLERANCE = 0.5   # tolerance for font size matching
 # SIMPLE CLEANER (optional)
 # -----------------------------
 def simple_clean(text: str) -> str:
-    """Very light cleanup: collapse whitespace, normalize newlines."""
+    """Very light cleanup: collapse whitespace, normalize newlines, and fix hyphenated line breaks."""
     if not text:
         return ""
+    
+    # Normalize newlines and spaces
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("\u00a0", " ")  # non-breaking space -> space
-    # Collapse 3+ newlines -> 2, 2 newlines -> paragraph break
+
+    # Fix line-break hyphenation: "electri- cal" -> "electrical"
+    # Pattern: word-ending-with-hyphen + whitespace + lowercase word
+    text = re.sub(r"(\b\w+)-\s+([a-z]{2,}\b)", r"\1\2", text)
+
+    # Collapse 3+ newlines -> special token
     PARA_TOKEN = "§§PARA_BREAK§§"
     text = re.sub(r"\n{2,}", PARA_TOKEN, text)
+
     # Collapse internal whitespace
     text = re.sub(r"\s+", " ", text).strip()
+
     # Restore paragraph-ish breaks
     text = text.replace(PARA_TOKEN, "\n\n")
     return text
