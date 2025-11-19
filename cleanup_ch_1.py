@@ -6,34 +6,55 @@ import fitz  # PyMuPDF
 # CONFIG
 # -----------------------------
 
-# Name of your PDF on the Desktop
 PDF_NAME = "Fundamental Neuroscience.pdf"
+OUTPUT_NAME = "Fundamental_Neuroscience_Chapter_01.txt"
 
-# Output text filename
-OUTPUT_NAME = "Fundamental_Neuroscience_Extract.txt"
+# Header/footer margins in points (72 pt ≈ 1 inch)
+HEADER_MARGIN = 70
+FOOTER_MARGIN = 70
 
-# Page range using the *printed* numbers you see at the bottom of the page
-PRINTED_START_PAGE = 1   # <-- change this
-PRINTED_END_PAGE   = 20  # <-- change this
+# Chapter title patterns (regex, case-insensitive)
+# We allow an optional leading "Chapter"
+START_RE = re.compile(
+    r"(?:chapter\s+)?1\s+The\s+Brain\s+and\s+Behavior",
+    re.IGNORECASE,
+)
 
-# Margins in points (72 pt ≈ 1 inch)
-HEADER_MARGIN = 70            # used when extracting body text
-FOOTER_MARGIN = 70            # used when extracting body text
-FOOTER_SCAN_HEIGHT = 120      # used when detecting printed page number
+END_RE = re.compile(
+    r"(?:chapter\s+)?2\s+Nerve\s+Cells,\s+Neural\s+Circuitry,\s+and\s+Behavior",
+    re.IGNORECASE,
+)
 
 
 # -----------------------------
 # HELPERS
 # -----------------------------
 
-def normalize_paragraph(text: str) -> str:
+def clean_block_text(text: str) -> str:
     """
-    Flatten internal newlines inside a block into single spaces,
-    and normalize repeated whitespace. This turns hard-wrapped
-    lines into smooth paragraphs.
+    Flatten hard-wrapped lines inside a block into spaces,
+    but preserve paragraph breaks (blank lines).
     """
-    # Replace newlines and tabs with spaces, then collapse runs of whitespace
-    return re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return ""
+
+    # Normalize line endings
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # Mark paragraph breaks: sequences of 2+ newlines
+    PARA_TOKEN = "§§PARA_BREAK§§"
+    text = re.sub(r"\n{2,}", PARA_TOKEN, text)
+
+    # Remaining single newlines are just line wraps -> spaces
+    text = text.replace("\n", " ")
+
+    # Collapse multiple spaces/tabs
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Restore paragraph breaks as double newlines
+    text = text.replace(PARA_TOKEN, "\n\n")
+
+    return text
 
 
 def extract_body_blocks(page):
@@ -44,7 +65,7 @@ def extract_body_blocks(page):
     body_paragraphs = []
     page_height = page.rect.height
 
-    # get_text("blocks") returns a list of tuples:
+    # get_text("blocks") returns tuples:
     # (x0, y0, x1, y1, text, block_no, block_type, ...)
     for block in page.get_text("blocks"):
         x0, y0, x1, y1, text = block[:5]
@@ -60,61 +81,12 @@ def extract_body_blocks(page):
         if y0 > page_height - FOOTER_MARGIN:
             continue
 
-        para = normalize_paragraph(text)
-        if para:
-            body_paragraphs.append(para)
+        cleaned = clean_block_text(text)
+        if cleaned:
+            body_paragraphs.append(cleaned)
 
     # Separate blocks with blank lines so paragraphs stay distinct
     return "\n\n".join(body_paragraphs)
-
-
-def detect_printed_page_number(page):
-    """
-    Try to detect the printed page number on this page by looking
-    in the bottom FOOTER_SCAN_HEIGHT region for a line that is
-    just digits (e.g., '23').
-    Returns an int or None if not found.
-    """
-    page_height = page.rect.height
-    footer_top = page_height - FOOTER_SCAN_HEIGHT
-
-    candidate_numbers = []
-
-    for block in page.get_text("blocks"):
-        x0, y0, x1, y1, text = block[:5]
-        if not text or not text.strip():
-            continue
-
-        # Only look in the bottom region
-        if y0 < footer_top:
-            continue
-
-        for line in text.splitlines():
-            line_stripped = line.strip()
-            if re.fullmatch(r"\d+", line_stripped):
-                try:
-                    candidate_numbers.append(int(line_stripped))
-                except ValueError:
-                    continue
-
-    # If multiple candidates (rare), pick the last one
-    if candidate_numbers:
-        return candidate_numbers[-1]
-    return None
-
-
-def build_printed_to_index_map(doc):
-    """
-    Build a mapping {printed_page_number: pdf_index}
-    by scanning each page's footer.
-    """
-    mapping = {}
-    for idx, page in enumerate(doc):
-        num = detect_printed_page_number(page)
-        if num is not None:
-            # Only keep the first occurrence of each printed number
-            mapping.setdefault(num, idx)
-    return mapping
 
 
 # -----------------------------
@@ -132,55 +104,72 @@ def main():
     doc = fitz.open(pdf_path)
     num_pages = doc.page_count
 
-    # Build mapping from printed page number -> internal index
-    printed_to_index = build_printed_to_index_map(doc)
+    # First pass: extract cleaned text per page,
+    # and detect which pages contain the 2nd occurrence
+    # of each chapter heading.
+    pages_text = []
+    start_count = 0
+    end_count = 0
+    start_page_idx = None
+    end_page_idx = None
 
-    if not printed_to_index:
-        print("Warning: Could not detect any printed page numbers in the footer.")
-        print("The script will fall back to using raw PDF indices (1-based).")
-        # Fallback: assume printed numbers == PDF index + 1
-        for i in range(num_pages):
-            printed_to_index[i + 1] = i
-
-    # Resolve the desired range
-    if PRINTED_START_PAGE > PRINTED_END_PAGE:
-        raise ValueError("PRINTED_START_PAGE must be <= PRINTED_END_PAGE.")
-
-    # Collect all indices that correspond to printed numbers in the range
-    selected_indices = []
-    for printed_num in range(PRINTED_START_PAGE, PRINTED_END_PAGE + 1):
-        if printed_num in printed_to_index:
-            selected_indices.append(printed_to_index[printed_num])
-        else:
-            print(f"Warning: Printed page {printed_num} not found in PDF; skipping.")
-
-    if not selected_indices:
-        raise ValueError("No pages matched the given printed page range. "
-                         "You may need to adjust PRINTED_START_PAGE/END_PAGE or footer detection.")
-
-    # Make sure we process in order
-    selected_indices = sorted(set(selected_indices))
-
-    print("Extracting PDF pages (0-based indices):", selected_indices)
-
-    collected_chunks = []
-    for page_index in selected_indices:
-        if page_index < 0 or page_index >= num_pages:
-            print(f"Skipping out-of-range index: {page_index}")
-            continue
-
-        page = doc[page_index]
+    for idx in range(num_pages):
+        page = doc[idx]
         body_text = extract_body_blocks(page)
-        if body_text:
-            collected_chunks.append(body_text)
+        pages_text.append(body_text)
+
+        # Normalize whitespace for matching chapter titles
+        search_text = re.sub(r"\s+", " ", body_text).strip()
+
+        # Count occurrences of the start chapter title
+        start_matches = START_RE.findall(search_text)
+        if start_matches:
+            start_count += len(start_matches)
+            if start_count >= 2 and start_page_idx is None:
+                start_page_idx = idx
+
+        # Count occurrences of the end chapter title
+        end_matches = END_RE.findall(search_text)
+        if end_matches:
+            end_count += len(end_matches)
+            if end_count >= 2 and end_page_idx is None:
+                end_page_idx = idx
+
+    print(f"Detected 2nd '1 The Brain and Behavior' on page index: {start_page_idx}")
+    print(f"Detected 2nd '2 Nerve Cells, Neural Circuitry, and Behavior' on page index: {end_page_idx}")
+
+    if start_page_idx is None:
+        raise RuntimeError(
+            "Could not find the 2nd occurrence of '1 The Brain and Behavior' "
+            "- check the exact chapter title or loosen the regex."
+        )
+    if end_page_idx is None:
+        raise RuntimeError(
+            "Could not find the 2nd occurrence of "
+            "'2 Nerve Cells, Neural Circuitry, and Behavior' "
+            "- check the exact chapter title or loosen the regex."
+        )
+    if end_page_idx <= start_page_idx:
+        raise RuntimeError(
+            f"End chapter page ({end_page_idx}) is not after start chapter page ({start_page_idx}). "
+            "The PDF may have an unusual layout."
+        )
+
+    # Second pass: collect all pages from start_page_idx up to (but not including) end_page_idx
+    collected_chunks = []
+    for idx in range(start_page_idx, end_page_idx):
+        text = pages_text[idx]
+        if text and text.strip():
+            collected_chunks.append(text)
 
     final_text = "\n\n".join(collected_chunks)
 
     if not final_text.strip():
-        print("Warning: No text was extracted. You may need to tweak HEADER_MARGIN/FOOTER_MARGIN.")
+        print("Warning: No text was collected between chapter boundaries.")
     else:
         output_path.write_text(final_text, encoding="utf-8")
-        print(f"Extracted printed pages {PRINTED_START_PAGE}-{PRINTED_END_PAGE} to: {output_path}")
+        print(f"Chapter 1 text written to: {output_path}")
+        print(f"Pages included (0-based indices): {list(range(start_page_idx, end_page_idx))}")
 
 
 if __name__ == "__main__":
