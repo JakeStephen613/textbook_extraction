@@ -5,11 +5,11 @@ import fitz  # PyMuPDF
 # -----------------------------
 # CONFIG
 # -----------------------------
-PDF_NAME = "test.pdf"  # on Desktop
+PDF_NAME = "textbook.pdf"  # on Desktop
 BASE_OUTPUT_FOLDER = "extracts"  # top-level folder on Desktop
 TITLE_FONT_SIZE = 40   # chapter titles
 CONTENT_FONT_SIZE = 10 # regular content
-FONT_TOLERANCE = 0.5   # tolerance for font size matching
+FONT_TOLERANCE = 0.1   # tolerance for font size matching
 
 # -----------------------------
 # SIMPLE CLEANER (optional)
