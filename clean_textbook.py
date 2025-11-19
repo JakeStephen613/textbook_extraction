@@ -6,10 +6,10 @@ import fitz  # PyMuPDF
 # CONFIG
 # -----------------------------
 PDF_NAME = "test.pdf"  # on Desktop
-OUTPUT_FOLDER = "Extracted_Chapters"  # folder for chapter files
-TITLE_FONT_SIZE = 40  # chapter titles
-CONTENT_FONT_SIZE = 10  # regular content
-FONT_TOLERANCE = 0.5  # tolerance for font size matching
+BASE_OUTPUT_FOLDER = "extracts"  # top-level folder on Desktop
+TITLE_FONT_SIZE = 40   # chapter titles
+CONTENT_FONT_SIZE = 10 # regular content
+FONT_TOLERANCE = 0.5   # tolerance for font size matching
 
 # -----------------------------
 # SIMPLE CLEANER (optional)
@@ -133,13 +133,19 @@ def extract_chapters_by_font(doc) -> list:
 def main():
     desktop = Path.home() / "Desktop"
     pdf_path = desktop / PDF_NAME
-    output_folder = desktop / OUTPUT_FOLDER
-    
+
     if not pdf_path.exists():
         raise FileNotFoundError(f"Could not find PDF at: {pdf_path}")
     
-    # Create output folder
+    # Create base 'extracts' folder on Desktop
+    base_output = desktop / BASE_OUTPUT_FOLDER
+    base_output.mkdir(exist_ok=True)
+    
+    # Create a subfolder named after the PDF (without extension)
+    pdf_stem = pdf_path.stem
+    output_folder = base_output / pdf_stem
     output_folder.mkdir(exist_ok=True)
+    
     print(f"[DEBUG] Output folder: {output_folder}")
     
     doc = fitz.open(pdf_path)
@@ -150,7 +156,7 @@ def main():
     
     print(f"\n[DEBUG] Found {len(chapters)} chapters")
     
-    # Save each chapter to a separate file
+    # Save each chapter to a separate file inside the output_folder
     for idx, chapter in enumerate(chapters, start=1):
         title = chapter['title']
         content = simple_clean(chapter['content'])
