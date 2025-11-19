@@ -7,7 +7,7 @@ import fitz  # PyMuPDF
 # -----------------------------
 
 # PDF file name (assumed to be on your Desktop)
-PDF_NAME = "test.pdf"
+PDF_NAME = "Fundamental Neuroscience.pdf"
 
 # Which page to test on (0-based index)
 PAGE_INDEX = 0  # start at page 0
@@ -95,3 +95,99 @@ def extract_body_blocks(page) -> str:
 
     # Sort blocks by reading order: top-to-bottom, then left-to-right
     blocks = sorted(blocks, key=lambda b: (b["bbox"][1], b["bbox"][0]))
+
+    for b in blocks:
+        if "lines" not in b:
+            continue
+
+        x0, y0, x1, y1 = b["bbox"]
+
+        # --- Coordinate filters ---
+        # Remove header area
+        if y1 < HEADER_MARGIN:
+            continue
+        # Remove footer area
+        if y0 > page_height - FOOTER_MARGIN:
+            continue
+
+        # Build text from spans that pass font-size filter
+        collected_text = []
+
+        for line in b["lines"]:
+            for span in line["spans"]:
+                text = span["text"].strip()
+                size = span["size"]  # font size in points
+
+                if not text:
+                    continue
+
+                # Skip tiny font text (graph labels, axis ticks, footnotes)
+                if size < FONT_SIZE_MIN:
+                    continue
+
+                collected_text.append(text)
+
+        if not collected_text:
+            continue
+
+        raw = " ".join(collected_text).strip()
+        if not raw:
+            continue
+
+        # --- BLOCK-LEVEL content filters ---
+
+        # Pure page number (e.g., "23")
+        if PAGE_NUM_RE.match(raw):
+            continue
+
+        # Obvious figure/table/box captions at start of block
+        if FIGURE_RE.match(raw):
+            continue
+
+        # Pure URL/email block
+        if URL_RE.search(raw) and not URL_RE.sub("", raw).strip():
+            continue
+        if EMAIL_RE.search(raw) and not EMAIL_RE.sub("", raw).strip():
+            continue
+
+        # Now do finer-grained cleaning inside the block
+        cleaned = clean_block_text(raw)
+        if cleaned:
+            body_paragraphs.append(cleaned)
+
+    # Separate blocks with blank lines so paragraphs stay distinct
+    return "\n\n".join(body_paragraphs)
+
+
+# -----------------------------
+# MAIN
+# -----------------------------
+
+def main():
+    desktop = Path.home() / "Desktop"
+    pdf_path = desktop / PDF_NAME
+    output_path = desktop / OUTPUT_NAME
+
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"Could not find PDF at: {pdf_path}")
+
+    doc = fitz.open(pdf_path)
+    num_pages = doc.page_count
+
+    if not (0 <= PAGE_INDEX < num_pages):
+        raise IndexError(
+            f"PAGE_INDEX {PAGE_INDEX} out of range for document with {num_pages} pages"
+        )
+
+    page = doc[PAGE_INDEX]
+    cleaned_text = extract_body_blocks(page)
+
+    if not cleaned_text.strip():
+        print(f"Warning: No relevant text extracted from page index {PAGE_INDEX}.")
+    else:
+        output_path.write_text(cleaned_text, encoding="utf-8")
+        print(f"Cleaned text for page {PAGE_INDEX} written to: {output_path}")
+
+
+if __name__ == "__main__":
+    main()
