@@ -6,7 +6,7 @@ import fitz  # PyMuPDF
 # CONFIG
 # -----------------------------
 
-PDF_NAME = "Fundamental Neuroscience.pdf"
+PDF_NAME = "test"
 
 # Which page to test on (0-based index)
 PAGE_INDEX = 10  # change this to whatever page you want
