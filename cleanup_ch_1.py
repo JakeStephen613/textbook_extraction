@@ -9,21 +9,15 @@ import fitz  # PyMuPDF
 PDF_NAME = "Fundamental Neuroscience.pdf"
 
 # Output text filename
-OUTPUT_NAME = "Fundamental_Neuroscience_Chapter_01.txt"
+OUTPUT_NAME = "Fundamental_Neuroscience_Extract.txt"
+
+# Page range (1-based, inclusive)
+START_PAGE = 1   # <-- change this
+END_PAGE   = 20  # <-- change this
 
 # Header/footer margins in points (roughly 72 pt = 1 inch)
 HEADER_MARGIN = 70
 FOOTER_MARGIN = 70
-
-# Text patterns that likely mark chapter boundaries
-CH1_MARKERS = ["chapter 1", "chapter one"]
-CH2_MARKERS = ["chapter 2", "chapter two"]
-
-
-def page_contains_any(text: str, markers):
-    """Return True if any of the markers appears in the text (case-insensitive)."""
-    text_lower = text.lower()
-    return any(m in text_lower for m in markers)
 
 
 def extract_body_blocks(page):
@@ -65,44 +59,32 @@ def main():
         raise FileNotFoundError(f"Could not find PDF at: {pdf_path}")
 
     doc = fitz.open(pdf_path)
+    num_pages = doc.page_count
 
-    in_chapter_1 = False
+    # Sanity checks on page range
+    if START_PAGE < 1 or END_PAGE < 1 or START_PAGE > END_PAGE:
+        raise ValueError("Invalid page range: check START_PAGE and END_PAGE.")
+    if END_PAGE > num_pages:
+        raise ValueError(f"END_PAGE ({END_PAGE}) is greater than total pages ({num_pages}).")
+
     collected_chunks = []
 
-    for page_index, page in enumerate(doc):
-        # Get full raw text for marker detection
-        full_text = page.get_text()
-        full_text_lower = full_text.lower()
+    # PyMuPDF pages are 0-based, our config is 1-based
+    for page_number in range(START_PAGE, END_PAGE + 1):
+        page_index = page_number - 1
+        page = doc[page_index]
 
-        # If we haven't entered chapter 1 yet, check for its marker
-        if not in_chapter_1:
-            if page_contains_any(full_text_lower, CH1_MARKERS):
-                in_chapter_1 = True
-            else:
-                # Not yet in chapter 1, skip this page entirely
-                continue
-
-        # If we're in chapter 1, check if this page already has the start of chapter 2
-        # If so, we stop BEFORE chapter 2 begins.
-        if page_contains_any(full_text_lower, CH2_MARKERS):
-            # We *might* have some chapter 1 text before the Chapter 2 heading
-            # For simplicity, we stop collecting as soon as we see Chapter 2.
-            break
-
-        # Extract only body text for this page
         body_text = extract_body_blocks(page)
         if body_text:
             collected_chunks.append(body_text)
 
-    # Join and write out
-    chapter_text = "\n\n".join(collected_chunks)
+    final_text = "\n\n".join(collected_chunks)
 
-    if not chapter_text.strip():
-        print("Warning: No text was extracted for Chapter 1. "
-              "You may need to adjust CH1_MARKERS or margins.")
+    if not final_text.strip():
+        print("Warning: No text was extracted. You may need to tweak HEADER_MARGIN/FOOTER_MARGIN.")
     else:
-        output_path.write_text(chapter_text, encoding="utf-8")
-        print(f"Chapter 1 text written to: {output_path}")
+        output_path.write_text(final_text, encoding="utf-8")
+        print(f"Extracted pages {START_PAGE}-{END_PAGE} to: {output_path}")
 
 
 if __name__ == "__main__":
