@@ -18,12 +18,17 @@ FONT_SIZE_MIN = 10  # keep all spans with size >= 8 pt
 # -----------------------------
 
 def simple_clean(text: str) -> str:
-    """Very light cleanup: collapse whitespace, normalize newlines."""
+    """Very light cleanup: collapse whitespace, normalize newlines, fix hyphen-broken words."""
     if not text:
         return ""
 
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("\u00a0", " ")  # non-breaking space -> space
+
+    # -------- NEW: Fix hyphenated line breaks ----------
+    # Converts:  "electri- cal"  →  "electrical"
+    text = re.sub(r"(\b\w+)-\s+([a-z]{2,}\b)", r"\1\2", text)
+    # ----------------------------------------------------
 
     # Collapse 3+ newlines -> 2, 2 newlines -> paragraph break
     PARA_TOKEN = "§§PARA_BREAK§§"
