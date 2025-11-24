@@ -12,18 +12,63 @@ CONTENT_FONT_SIZE = 10 # regular content
 FONT_TOLERANCE = 0.1   # tolerance for font size matching
 
 # -----------------------------
-# SIMPLE CLEANER (optional)
+# UNICODE NORMALIZATION
 # -----------------------------
-def simple_clean(text: str) -> str:
-    """Very light cleanup: collapse whitespace, normalize newlines, and fix hyphenated line breaks."""
+UNICODE_NORMALIZATION_MAP = {
+    # Ligatures
+    'ﬁ': 'fi',
+    'ﬂ': 'fl',
+    'ﬀ': 'ff',
+    'ﬃ': 'ffi',
+    'ﬄ': 'ffl',
+    'ﬆ': 'st',
+    # Curly quotes and dashes
+    ''': "'",
+    ''': "'",
+    '"': '"',
+    '"': '"',
+    '‚': ',',
+    '„': '"',
+    '–': '-',  # en dash
+    '—': '-',  # em dash
+    '―': '-',  # horizontal bar
+    # Other common unicode issues
+    '…': '...',
+    '•': '*',
+    '·': '*',
+    '×': 'x',
+    '÷': '/',
+}
+
+def normalize_unicode(text: str) -> str:
+    """Normalize unicode ligatures and special characters to ASCII equivalents."""
     if not text:
         return ""
+    
+    for old_char, new_char in UNICODE_NORMALIZATION_MAP.items():
+        text = text.replace(old_char, new_char)
+    
+    return text
+
+# -----------------------------
+# SIMPLE CLEANER
+# -----------------------------
+def simple_clean(text: str) -> str:
+    """Light cleanup: unicode normalization, collapse whitespace, normalize newlines, fix hyphenation."""
+    if not text:
+        return ""
+    
+    # Apply unicode normalization first
+    text = normalize_unicode(text)
     
     # Normalize newlines and spaces
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("\u00a0", " ")  # non-breaking space -> space
+    text = text.replace("\u2009", " ")  # thin space -> space
+    text = text.replace("\u202f", " ")  # narrow no-break space -> space
 
     # Fix line-break hyphenation: "electri- cal" -> "electrical"
+    # This runs AFTER unicode normalization, so ligatures are already fixed
     text = re.sub(r"(\b\w+)-\s+([a-z]{2,}\b)", r"\1\2", text)
 
     # Collapse 3+ newlines -> special token
@@ -35,6 +80,7 @@ def simple_clean(text: str) -> str:
 
     # Restore paragraph-ish breaks
     text = text.replace(PARA_TOKEN, "\n\n")
+    
     return text
 
 # -----------------------------
@@ -42,11 +88,14 @@ def simple_clean(text: str) -> str:
 # -----------------------------
 def sanitize_filename(title: str) -> str:
     """Convert chapter title to valid filename. No chapter numbers, just title."""
+    # Remove invalid filename characters
     title = re.sub(r'[<>:"/\\|?*]', '', title)
     title = title.strip()
+    
     if not title:
         return "untitled_chapter.txt"
-    # Limit length
+    
+    # Limit length to avoid filesystem issues
     title = title[:120]
     return f"{title}.txt"
 
@@ -55,7 +104,7 @@ def sanitize_filename(title: str) -> str:
 # -----------------------------
 def extract_chapters_by_font(doc) -> list:
     """
-    Extract chapters based on font sizes.
+    Extract chapters based on font sizes with improved span ordering.
     Returns list of dicts: {'title': str, 'content': str}
     """
     chapters = []
@@ -75,12 +124,16 @@ def extract_chapters_by_font(doc) -> list:
 
         page_spans = []
 
-        # Collect all spans with position info
+        # Collect all spans with position info and normalize unicode
         for b in blocks:
             lines = b.get("lines", [])
             for line in lines:
                 for span in line.get("spans", []):
                     text = span.get("text", "").strip()
+                    
+                    # Apply unicode normalization immediately when reading
+                    text = normalize_unicode(text)
+                    
                     size = span.get("size", 0)
                     (x0, y0, x1, y1) = span.get("bbox", (0, 0, 0, 0))
                     cx = (x0 + x1) / 2
@@ -91,14 +144,24 @@ def extract_chapters_by_font(doc) -> list:
                     page_spans.append({
                         'text': text,
                         'size': size,
-                        'y': y0,
-                        'x': cx,
+                        'x0': x0,
+                        'y0': y0,
+                        'x1': x1,
+                        'y1': y1,
+                        'cx': cx,
                         'is_left': cx < mid_x
                     })
 
-        # Sort spans: first by column (left then right), then by y position
-        left_spans = sorted([s for s in page_spans if s['is_left']], key=lambda s: s['y'])
-        right_spans = sorted([s for s in page_spans if not s['is_left']], key=lambda s: s['y'])
+        # Improved sorting: group by rounded y-position, then by x
+        # This handles within-line ordering better
+        left_spans = sorted(
+            [s for s in page_spans if s['is_left']], 
+            key=lambda s: (round(s['y0'], 1), s['x0'])
+        )
+        right_spans = sorted(
+            [s for s in page_spans if not s['is_left']], 
+            key=lambda s: (round(s['y0'], 1), s['x0'])
+        )
         sorted_spans = left_spans + right_spans
 
         prev_span = None  # resets per page
@@ -146,9 +209,12 @@ def extract_chapters_by_font(doc) -> list:
                     # FIRST 10-pt word for this chapter:
                     # prepend the last character of the immediately previous span,
                     # regardless of that span's font.
+                    # This recovers characters that sometimes get lost at chapter boundaries.
                     if not current_chapter.get('_has_content', False):
                         current_chapter['_has_content'] = True
                         if prev_span is not None and prev_span['text']:
+                            # With improved ordering and unicode normalization,
+                            # this should be more reliable
                             text = prev_span['text'][-1] + text
 
                     current_chapter['content'] += text + " "
@@ -157,6 +223,7 @@ def extract_chapters_by_font(doc) -> list:
                 continue
 
             # Any other font size: just advance prev_span
+            # This ensures we track the last span regardless of font
             prev_span = span
 
         # Progress indicator
@@ -203,9 +270,11 @@ def main():
         title = chapter['title']
         content = simple_clean(chapter['content'])
 
-        # --- NEW: scrub the trailing "Selected Readings References" phrase ---
+        # Scrub the trailing "Selected Readings References" phrase
         content = content.replace("Selected Readings References", "")
-        # (keeps everything else exactly the same)
+        
+        # Additional cleanup: remove any double spaces that might have been introduced
+        content = re.sub(r'\s+', ' ', content).strip()
 
         if not content.strip():
             print(f"[DEBUG] Skipping empty chapter: {title}")
