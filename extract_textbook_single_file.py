@@ -6,7 +6,7 @@ import fitz  # PyMuPDF
 # CONFIG
 # -----------------------------
 PDF_NAME = "textbook.pdf"  # on Desktop
-BASE_OUTPUT_FOLDER = "extracts"  # top-level folder on Desktop
+BASE_OUTPUT_FOLDER = "extracts"  # still defined but no longer used for final txt
 TITLE_FONT_SIZE = 40   # chapter titles
 CONTENT_FONT_SIZE = 10 # regular content
 FONT_TOLERANCE = 0.1   # tolerance for font size matching
@@ -179,28 +179,19 @@ def main():
     if not pdf_path.exists():
         raise FileNotFoundError(f"Could not find PDF at: {pdf_path}")
 
-    # Create base 'extracts' folder on Desktop
-    base_output = desktop / BASE_OUTPUT_FOLDER
-    base_output.mkdir(exist_ok=True)
-
-    # Create a subfolder named after the PDF (without extension)
     pdf_stem = pdf_path.stem
-    output_folder = base_output / pdf_stem
-    output_folder.mkdir(exist_ok=True)
 
-    print(f"[DEBUG] Output folder: {output_folder}")
+    print(f"[DEBUG] Using Desktop as output directory")
+    print(f"[DEBUG] Opened PDF: {PDF_NAME}")
 
     doc = fitz.open(pdf_path)
-    print(f"[DEBUG] Opened PDF: {PDF_NAME}")
 
     # Extract all chapters
     chapters = extract_chapters_by_font(doc)
 
     print(f"\n[DEBUG] Found {len(chapters)} chapters")
 
-    # ---------------------------------
-    # NEW: combine all chapter contents
-    # ---------------------------------
+    # Combine all chapter contents
     all_content_parts = []
 
     for chapter in chapters:
@@ -215,15 +206,15 @@ def main():
 
         all_content_parts.append(content)
 
-    # Join everything into one big text blob
     full_text = "\n\n".join(all_content_parts)
 
+    # ---- WRITE SINGLE FILE DIRECTLY TO DESKTOP ----
     combined_filename = f"{pdf_stem}_all_text.txt"
-    combined_filepath = output_folder / combined_filename
+    combined_filepath = desktop / combined_filename
     combined_filepath.write_text(full_text, encoding="utf-8")
 
-    print(f"[DEBUG] Saved combined text file: {combined_filename} ({len(full_text)} chars)")
-    print(f"\n[DEBUG] COMPLETE: Extracted {len(chapters)} chapters and wrote combined text to {combined_filepath}")
+    print(f"[DEBUG] Saved combined text file to Desktop: {combined_filename} ({len(full_text)} chars)")
+    print(f"\n[DEBUG] COMPLETE")
 
     doc.close()
 
